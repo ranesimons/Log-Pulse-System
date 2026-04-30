@@ -160,5 +160,5 @@ The Deployment runs 2 replicas with CPU/memory limits and HTTP liveness/readines
 - **Alerting** — threshold-based rules that fire webhooks when error rate exceeds a configured %, stored in a separate `alert_rules` table.
 - **Log retention policy** — `pg_partman` table partitioning by month + automatic partition drop for cost control.
 - **Structured filtering on metadata** — expose a query DSL for metadata fields in the UI (e.g. `metadata.request_id = "abc"`).
-- **WebSocket push** — replace 15s polling with a server-sent events or WebSocket stream for true real-time updates.
+- **WebSocket push** — replace 15s polling with a server-sent events for true real-time updates.
 - **OpenTelemetry collector** — add an OTLP endpoint so any OTel-instrumented service can ship traces + logs without SDK changes.
