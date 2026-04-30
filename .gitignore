@@ -18,7 +18,7 @@ frontend/.vite/
 .env.local
 .env.*.local
 
-# K8s secrets (keep only the example)
+# K8s secrets (production only — local is safe to commit)
 k8s/secret.yaml
 
 # OS

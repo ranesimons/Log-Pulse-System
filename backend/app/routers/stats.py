@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, Depends, Query
@@ -12,11 +13,32 @@ from ..schemas import LevelBucket, OverviewStats, ServiceBucket, TimelineBucket
 router = APIRouter(prefix="/api/v1/stats", tags=["stats"])
 
 
+class _TTLCache:
+    def __init__(self, ttl: float = 5.0):
+        self._store: dict[str, tuple[float, Any]] = {}
+        self._ttl = ttl
+
+    def get(self, key: str) -> Any | None:
+        entry = self._store.get(key)
+        if entry and time.monotonic() - entry[0] < self._ttl:
+            return entry[1]
+        return None
+
+    def set(self, key: str, val: Any) -> None:
+        self._store[key] = (time.monotonic(), val)
+
+
+_cache = _TTLCache(ttl=5.0)
+
+
 @router.get("/overview", response_model=OverviewStats)
 async def overview(
     hours: int = Query(24, ge=1, le=720),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
+    if hit := _cache.get(f"overview:{hours}"):
+        return hit
+
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -35,7 +57,7 @@ async def overview(
 
     total = row["total_logs"] or 0
     errors = (row["error_count"] or 0) + (row["fatal_count"] or 0)
-    return OverviewStats(
+    result = OverviewStats(
         total_logs=total,
         error_count=row["error_count"] or 0,
         fatal_count=row["fatal_count"] or 0,
@@ -44,6 +66,8 @@ async def overview(
         unique_services=row["unique_services"] or 0,
         window_hours=hours,
     )
+    _cache.set(f"overview:{hours}", result)
+    return result
 
 
 @router.get("/by-level", response_model=list[LevelBucket])
@@ -51,6 +75,9 @@ async def by_level(
     hours: int = Query(24, ge=1, le=720),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
+    if hit := _cache.get(f"by-level:{hours}"):
+        return hit
+
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -63,7 +90,9 @@ async def by_level(
             """,
             since,
         )
-    return [LevelBucket(level=r["level"], count=r["count"]) for r in rows]
+    result = [LevelBucket(level=r["level"], count=r["count"]) for r in rows]
+    _cache.set(f"by-level:{hours}", result)
+    return result
 
 
 @router.get("/by-service", response_model=list[ServiceBucket])
@@ -72,6 +101,9 @@ async def by_service(
     top: int = Query(10, ge=1, le=50),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
+    if hit := _cache.get(f"by-service:{hours}:{top}"):
+        return hit
+
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -89,10 +121,12 @@ async def by_service(
             since,
             top,
         )
-    return [
+    result = [
         ServiceBucket(service=r["service"], count=r["count"], error_count=r["error_count"])
         for r in rows
     ]
+    _cache.set(f"by-service:{hours}:{top}", result)
+    return result
 
 
 @router.get("/timeline", response_model=list[TimelineBucket])
@@ -101,15 +135,20 @@ async def timeline(
     buckets: int = Query(24, ge=4, le=168),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
+    if hit := _cache.get(f"timeline:{hours}:{buckets}"):
+        return hit
+
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     interval_secs = (hours * 3600) // buckets
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT
-                to_timestamp(
-                    floor(EXTRACT(EPOCH FROM timestamp) / $2) * $2
-                ) AT TIME ZONE 'UTC' AS bucket,
+                date_bin(
+                    make_interval(secs => $2),
+                    timestamp,
+                    TIMESTAMPTZ '2000-01-01'
+                ) AS bucket,
                 COUNT(*)                                         AS total,
                 COUNT(*) FILTER (WHERE level = 'DEBUG')         AS debug,
                 COUNT(*) FILTER (WHERE level = 'INFO')          AS info,
@@ -124,7 +163,7 @@ async def timeline(
             since,
             interval_secs,
         )
-    return [
+    result = [
         TimelineBucket(
             bucket=r["bucket"],
             total=r["total"],
@@ -136,12 +175,18 @@ async def timeline(
         )
         for r in rows
     ]
+    _cache.set(f"timeline:{hours}:{buckets}", result)
+    return result
 
 
 @router.get("/services", response_model=list[str])
 async def list_services(pool: asyncpg.Pool = Depends(get_pool)):
+    if hit := _cache.get("services"):
+        return hit
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT DISTINCT service FROM logs ORDER BY service"
         )
-    return [r["service"] for r in rows]
+    result = [r["service"] for r in rows]
+    _cache.set("services", result)
+    return result

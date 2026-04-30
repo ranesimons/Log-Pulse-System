@@ -1,19 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: logpulse-backend
+  name: backend
   labels:
-    app: logpulse-backend
+    app: backend
 spec:
-  replicas: 2
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      app: logpulse-backend
+      app: backend
   template:
     metadata:
       labels:
-        app: logpulse-backend
+        app: backend
     spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      terminationGracePeriodSeconds: 5
       containers:
         - name: backend
           image: logpulse-backend:latest

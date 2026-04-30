@@ -90,57 +90,86 @@ All stat endpoints accept a `?hours=24` window parameter.
 
 ---
 
-## Setup
+## Getting Started
 
 ### Prerequisites
 - Docker + Docker Compose v2
 
-### Run locally
+### 1. Start the stack
 
 ```bash
-# Start all services
 docker compose up --build
+```
 
-# In a separate terminal, seed 100K rows
+### 2. Seed 100K rows
+
+```bash
 docker compose --profile seed run --rm seed
 ```
+
+> **Note:** The seed script distributes logs realistically — 70% within the last 24 hours and 30% spread randomly across the last 30 days. The default dashboard window is 24 hours, so switching to the 7-day view will show ~77K logs and the full 100K only appears at the 30-day window.
+
+### 3. Open the dashboard
 
 - Frontend: http://localhost:3000
 - API docs: http://localhost:8000/docs
 
-### Run without Docker
+### Tear down
 
 ```bash
-# Start PostgreSQL (requires psql locally or a running instance)
-createdb logpulse
-
-# Backend
-cd backend
-pip install -r requirements.txt
-DATABASE_URL=postgresql://localhost/logpulse uvicorn app.main:app --reload
-
-# Seed
-DATABASE_URL=postgresql://localhost/logpulse python scripts/seed.py
-
-# Frontend
-cd frontend
-npm install && npm run dev
+docker compose down
 ```
 
 ---
 
-## Kubernetes Deployment
+## Kubernetes (Alternative)
+
+K8s is supported as an alternative to Docker Compose using [kind](https://kind.sigs.k8s.io/) (Kubernetes inside Docker). Docker Compose and the kind cluster cannot run at the same time as they share ports — stop one before starting the other.
+
+### Prerequisites
 
 ```bash
-# Apply secret (edit k8s/secret-example.yaml first)
-kubectl apply -f k8s/secret-example.yaml
-
-# Deploy backend
-kubectl apply -f k8s/backend-deployment.yaml
-kubectl apply -f k8s/backend-service.yaml
+brew install kind kubectl
 ```
 
-The Deployment runs 2 replicas with CPU/memory limits and HTTP liveness/readiness probes.
+### Start
+
+```bash
+bash k8s/setup-kind.sh
+```
+
+Builds both images, loads them into the cluster, applies all manifests, and waits for readiness.
+
+### Seed 100K rows
+
+```bash
+kubectl run seed --image=logpulse-backend:latest --image-pull-policy=IfNotPresent --restart=Never \
+  --overrides='{"spec":{"hostNetwork":true}}' \
+  --env=DATABASE_URL=postgresql://logpulse:logpulse@localhost:5432/logpulse \
+  -- python scripts/seed.py
+```
+
+### Redeploy after code changes
+
+```bash
+bash k8s/redeploy.sh
+```
+
+### Tear down
+
+```bash
+kind delete cluster --name logpulse
+```
+
+### Production readiness gaps
+
+The K8s manifests are tuned for kind and would need the following changes before a production deployment:
+
+- **`hostNetwork: true`** — used to bypass iptables latency in kind. Remove it in production (real clusters have fast CNI) and revert `DATABASE_URL` to `postgres:5432`.
+- **Credentials** — `secret-local.yaml` contains plaintext dev credentials. Production should use a secrets manager (AWS Secrets Manager, Vault, Sealed Secrets).
+- **`strategy: Recreate` + `replicas: 1`** — required in kind because `hostNetwork` causes port conflicts on a single node. Production should use `RollingUpdate` with multiple replicas and `PodDisruptionBudgets`.
+- **No Ingress** — services are exposed via NodePort. Production needs an `Ingress` resource with TLS termination (nginx-ingress, ALB, etc.).
+- **PostgreSQL as a Deployment** — fine for dev but production should use a managed database (RDS, Cloud SQL) or a `StatefulSet` with backup configuration.
 
 ---
 

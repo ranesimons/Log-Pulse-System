@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+data:
+  init.sql: |
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+    CREATE TABLE IF NOT EXISTS logs (
+        id          UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+        timestamp   TIMESTAMPTZ NOT NULL,
+        level       VARCHAR(10) NOT NULL CHECK (level IN ('DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL')),
+        service     VARCHAR(100) NOT NULL,
+        message     TEXT        NOT NULL,
+        host        VARCHAR(255),
+        environment VARCHAR(20) NOT NULL DEFAULT 'production',
+        trace_id    VARCHAR(64),
+        span_id     VARCHAR(32),
+        metadata    JSONB       NOT NULL DEFAULT '{}',
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_logs_timestamp         ON logs (timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_logs_level_timestamp   ON logs (level, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_logs_service_timestamp ON logs (service, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_logs_trace_id          ON logs (trace_id) WHERE trace_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_logs_message_fts       ON logs USING GIN (to_tsvector('english', message));
+    CREATE INDEX IF NOT EXISTS idx_logs_metadata          ON logs USING GIN (metadata);
