@@ -7,18 +7,18 @@ A log ingestion and observability system that stores high-volume structured log 
 ## Architecture
 
 ```
-┌─────────────┐     HTTP/REST      ┌──────────────┐     asyncpg      ┌─────────────┐
-│   React UI  │ ◄────────────────► │  FastAPI API  │ ◄──────────────► │  PostgreSQL  │
-│  (Vite SPA) │                    │  (Python 3.12)│                  │  (16-alpine) │
-└─────────────┘                    └──────────────┘                  └─────────────┘
-     :3000                               :8000                             :5432
+┌──────────────────┐     HTTP/REST      ┌──────────────┐     asyncpg      ┌─────────────┐
+│  Svelte 5 + TS   │ ◄────────────────► │  FastAPI API  │ ◄──────────────► │  PostgreSQL  │
+│   (Vite SPA)     │                    │  (Python 3.12)│                  │  (16-alpine) │
+└──────────────────┘                    └──────────────┘                  └─────────────┘
+       :3000                                  :8000                             :5432
 ```
 
 ### Components
 
 | Layer | Tech | Role |
 |-------|------|------|
-| Frontend | React 18 + Vite + Recharts | Dashboard SPA with charts, filters, log table |
+| Frontend | Svelte 5 + TypeScript + Vite + Chart.js | Dashboard SPA with charts, filters, log table |
 | Backend | FastAPI + asyncpg | REST API for ingest and query |
 | Database | PostgreSQL 16 | Persistent log storage with optimized indexes |
 | Infra | Docker Compose + K8s | Local dev and cluster deployment |
@@ -151,7 +151,7 @@ The Deployment runs 2 replicas with CPU/memory limits and HTTP liveness/readines
 - **asyncpg over SQLAlchemy ORM** — lower abstraction = faster async queries, no ORM overhead on 100K row aggregations.
 - **GIN index on `metadata` JSONB** — keeps arbitrary metadata filterable without schema changes, at the cost of slightly slower writes.
 - **FastAPI over Flask/Django** — native async + automatic OpenAPI docs is a better fit for a high-throughput ingest API.
-- **React over Svelte** — broader ecosystem for Recharts; Svelte would be fine for a greenfield project.
+- **Svelte 5 + TypeScript over React** — Svelte's compiled output is smaller and faster with no virtual DOM; runes (`$state`, `$effect`, `$derived`) make reactivity explicit and easy to follow; Chart.js bound directly to canvas elements keeps the charting layer thin.
 
 ### Given more time
 - **Ingest queue** — put Kafka or Redis Streams in front of the DB write so spikes don't block the ingest endpoint.
